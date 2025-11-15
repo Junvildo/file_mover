@@ -88,46 +88,51 @@ fn hide_files_in_directory(directory: &str, files: Vec<String>) -> Result<(), St
     use std::path::Path;
     use std::fs;
     use std::os::windows::ffi::OsStrExt;
-    use winapi::um::winnt::FILE_ATTRIBUTE_HIDDEN;
+    use winapi::um::winnt::{FILE_ATTRIBUTE_HIDDEN, FILE_ATTRIBUTE_SYSTEM};
     use std::os::windows::fs::MetadataExt;
     use std::io;
-    
+
     let dir_path = Path::new(directory);
     if !dir_path.exists() {
         return Err("Directory does not exist".to_string());
     }
-    
+
     for file in files {
         let file_path = dir_path.join(&file);
         if file_path.exists() {
             // Get current attributes
             let metadata = fs::metadata(&file_path)
                 .map_err(|e| format!("Failed to get file metadata for {}: {}", file_path.display(), e))?;
-            
             let current_attrs = metadata.file_attributes();
-            
-            // Set hidden attribute
+
+            // Add SYSTEM + HIDDEN
+            let new_attrs = current_attrs | FILE_ATTRIBUTE_SYSTEM | FILE_ATTRIBUTE_HIDDEN;
+
             unsafe {
                 let wide_path: Vec<u16> = file_path.as_os_str()
                     .encode_wide()
                     .chain(std::iter::once(0))
                     .collect();
-                
+
                 let success = winapi::um::fileapi::SetFileAttributesW(
                     wide_path.as_ptr(),
-                    current_attrs | FILE_ATTRIBUTE_HIDDEN
+                    new_attrs
                 );
-                
+
                 if success == 0 {
                     let error = io::Error::last_os_error();
-                    return Err(format!("Failed to set hidden attribute for {}: {}", file_path.display(), error));
+                    return Err(format!(
+                        "Failed to set system+hidden attributes for {}: {}",
+                        file_path.display(),
+                        error
+                    ));
                 }
             }
         } else {
             return Err(format!("File does not exist: {}", file_path.display()));
         }
     }
-    
+
     Ok(())
 }
 
@@ -137,49 +142,50 @@ fn show_files_in_directory(directory: &str, files: Vec<String>) -> Result<(), St
     use std::path::Path;
     use std::fs;
     use std::os::windows::ffi::OsStrExt;
-    use winapi::um::winnt::FILE_ATTRIBUTE_HIDDEN;
+    use winapi::um::winnt::{FILE_ATTRIBUTE_HIDDEN, FILE_ATTRIBUTE_SYSTEM};
     use std::os::windows::fs::MetadataExt;
     use std::io;
-    
+
     let dir_path = Path::new(directory);
     if !dir_path.exists() {
         return Err("Directory does not exist".to_string());
     }
-    
+
     for file in files {
         let file_path = dir_path.join(&file);
         if file_path.exists() {
-            // Get current attributes
             let metadata = fs::metadata(&file_path)
                 .map_err(|e| format!("Failed to get file metadata for {}: {}", file_path.display(), e))?;
-            
             let current_attrs = metadata.file_attributes();
-            
-            // Remove hidden attribute
-            let new_attrs = current_attrs & !FILE_ATTRIBUTE_HIDDEN;
-            
-            // Set the new attributes
+
+            // Remove SYSTEM + HIDDEN
+            let new_attrs = current_attrs & !FILE_ATTRIBUTE_SYSTEM & !FILE_ATTRIBUTE_HIDDEN;
+
             unsafe {
                 let wide_path: Vec<u16> = file_path.as_os_str()
                     .encode_wide()
                     .chain(std::iter::once(0))
                     .collect();
-                
+
                 let success = winapi::um::fileapi::SetFileAttributesW(
                     wide_path.as_ptr(),
                     new_attrs
                 );
-                
+
                 if success == 0 {
                     let error = io::Error::last_os_error();
-                    return Err(format!("Failed to remove hidden attribute for {}: {}", file_path.display(), error));
+                    return Err(format!(
+                        "Failed to remove system+hidden attributes for {}: {}",
+                        file_path.display(),
+                        error
+                    ));
                 }
             }
         } else {
             return Err(format!("File does not exist: {}", file_path.display()));
         }
     }
-    
+
     Ok(())
 }
 
