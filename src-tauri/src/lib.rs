@@ -85,7 +85,12 @@ fn list_files(path: &str) -> Result<Vec<String>, String> {
 #[tauri::command]
 #[cfg(windows)]
 fn hide_files_in_directory(directory: &str, files: Vec<String>) -> Result<(), String> {
-    use std::path::PathBuf;
+    use std::path::Path;
+    use std::fs;
+    use std::os::windows::ffi::OsStrExt;
+    use winapi::um::winnt::FILE_ATTRIBUTE_HIDDEN;
+    use std::os::windows::fs::MetadataExt;
+    use std::io;
     
     let dir_path = Path::new(directory);
     if !dir_path.exists() {
@@ -95,15 +100,31 @@ fn hide_files_in_directory(directory: &str, files: Vec<String>) -> Result<(), St
     for file in files {
         let file_path = dir_path.join(&file);
         if file_path.exists() {
-            let cmd = format!("attrib +h \"{}\"", file_path.to_string_lossy());
-            let output = Command::new("cmd")
-                .args(&["/C", &cmd])
-                .output()
-                .map_err(|e| format!("Failed to execute attrib command: {}", e))?;
+            // Get current attributes
+            let metadata = fs::metadata(&file_path)
+                .map_err(|e| format!("Failed to get file metadata for {}: {}", file_path.display(), e))?;
+            
+            let current_attrs = metadata.file_attributes();
+            
+            // Set hidden attribute
+            unsafe {
+                let wide_path: Vec<u16> = file_path.as_os_str()
+                    .encode_wide()
+                    .chain(std::iter::once(0))
+                    .collect();
                 
-            if !output.status.success() {
-                return Err(format!("Failed to hide file {}: {}", file, String::from_utf8_lossy(&output.stderr)));
+                let success = winapi::um::fileapi::SetFileAttributesW(
+                    wide_path.as_ptr(),
+                    current_attrs | FILE_ATTRIBUTE_HIDDEN
+                );
+                
+                if success == 0 {
+                    let error = io::Error::last_os_error();
+                    return Err(format!("Failed to set hidden attribute for {}: {}", file_path.display(), error));
+                }
             }
+        } else {
+            return Err(format!("File does not exist: {}", file_path.display()));
         }
     }
     
@@ -113,7 +134,12 @@ fn hide_files_in_directory(directory: &str, files: Vec<String>) -> Result<(), St
 #[tauri::command]
 #[cfg(windows)]
 fn show_files_in_directory(directory: &str, files: Vec<String>) -> Result<(), String> {
-    use std::path::PathBuf;
+    use std::path::Path;
+    use std::fs;
+    use std::os::windows::ffi::OsStrExt;
+    use winapi::um::winnt::FILE_ATTRIBUTE_HIDDEN;
+    use std::os::windows::fs::MetadataExt;
+    use std::io;
     
     let dir_path = Path::new(directory);
     if !dir_path.exists() {
@@ -123,15 +149,34 @@ fn show_files_in_directory(directory: &str, files: Vec<String>) -> Result<(), St
     for file in files {
         let file_path = dir_path.join(&file);
         if file_path.exists() {
-            let cmd = format!("attrib -h \"{}\"", file_path.to_string_lossy());
-            let output = Command::new("cmd")
-                .args(&["/C", &cmd])
-                .output()
-                .map_err(|e| format!("Failed to execute attrib command: {}", e))?;
+            // Get current attributes
+            let metadata = fs::metadata(&file_path)
+                .map_err(|e| format!("Failed to get file metadata for {}: {}", file_path.display(), e))?;
+            
+            let current_attrs = metadata.file_attributes();
+            
+            // Remove hidden attribute
+            let new_attrs = current_attrs & !FILE_ATTRIBUTE_HIDDEN;
+            
+            // Set the new attributes
+            unsafe {
+                let wide_path: Vec<u16> = file_path.as_os_str()
+                    .encode_wide()
+                    .chain(std::iter::once(0))
+                    .collect();
                 
-            if !output.status.success() {
-                return Err(format!("Failed to show file {}: {}", file, String::from_utf8_lossy(&output.stderr)));
+                let success = winapi::um::fileapi::SetFileAttributesW(
+                    wide_path.as_ptr(),
+                    new_attrs
+                );
+                
+                if success == 0 {
+                    let error = io::Error::last_os_error();
+                    return Err(format!("Failed to remove hidden attribute for {}: {}", file_path.display(), error));
+                }
             }
+        } else {
+            return Err(format!("File does not exist: {}", file_path.display()));
         }
     }
     
